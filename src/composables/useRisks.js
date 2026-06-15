@@ -122,6 +122,7 @@ const createSampleRisks = () => {
       owner: '张三',
       createdAt: new Date('2024-01-10').toISOString(),
       updatedAt: new Date('2024-01-10').toISOString(),
+      lastEditedAt: new Date('2024-01-10').toISOString(),
       mitigation: ''
     },
     {
@@ -134,6 +135,7 @@ const createSampleRisks = () => {
       owner: '李四',
       createdAt: new Date('2024-01-08').toISOString(),
       updatedAt: new Date('2024-01-12').toISOString(),
+      lastEditedAt: new Date('2024-01-12').toISOString(),
       mitigation: '计划重构核心模块'
     },
     {
@@ -146,6 +148,7 @@ const createSampleRisks = () => {
       owner: '王五',
       createdAt: new Date('2024-01-05').toISOString(),
       updatedAt: new Date('2024-01-05').toISOString(),
+      lastEditedAt: new Date('2024-01-05').toISOString(),
       mitigation: ''
     },
     {
@@ -158,6 +161,7 @@ const createSampleRisks = () => {
       owner: '赵六',
       createdAt: new Date('2024-01-02').toISOString(),
       updatedAt: new Date('2024-01-15').toISOString(),
+      lastEditedAt: new Date('2024-01-15').toISOString(),
       mitigation: '增加熔断和降级机制，已上线验证'
     },
     {
@@ -170,6 +174,7 @@ const createSampleRisks = () => {
       owner: '孙七',
       createdAt: new Date('2023-12-20').toISOString(),
       updatedAt: new Date('2024-01-10').toISOString(),
+      lastEditedAt: new Date('2024-01-10').toISOString(),
       mitigation: '优化数据库查询，增加缓存层'
     }
   ]
@@ -251,6 +256,66 @@ watch(risks, (newVal) => {
   saveToStorage(newVal)
 }, { deep: true })
 
+const mergeRemoteRisks = (remoteRisks) => {
+  const remoteMap = new Map(remoteRisks.map(r => [r.id, r]))
+  const localIds = new Set(risks.value.map(r => r.id))
+  const remoteIds = new Set(remoteRisks.map(r => r.id))
+  
+  const toAdd = []
+  const toUpdate = []
+  const toDelete = []
+  
+  for (const remoteRisk of remoteRisks) {
+    if (!localIds.has(remoteRisk.id)) {
+      toAdd.push(remoteRisk)
+    } else {
+      const localRisk = risks.value.find(r => r.id === remoteRisk.id)
+      const remoteTime = new Date(remoteRisk.lastEditedAt || 0).getTime()
+      const localTime = new Date(localRisk.lastEditedAt || 0).getTime()
+      if (remoteTime > localTime) {
+        toUpdate.push(remoteRisk)
+      }
+    }
+  }
+  
+  for (const localRisk of risks.value) {
+    if (!remoteIds.has(localRisk.id)) {
+      toDelete.push(localRisk.id)
+    }
+  }
+  
+  if (toAdd.length === 0 && toUpdate.length === 0 && toDelete.length === 0) {
+    return false
+  }
+  
+  isApplyingRemoteChange = true
+  try {
+    for (const id of toDelete) {
+      const index = risks.value.findIndex(r => r.id === id)
+      if (index !== -1) {
+        risks.value.splice(index, 1)
+      }
+    }
+    
+    for (const remoteRisk of toUpdate) {
+      const index = risks.value.findIndex(r => r.id === remoteRisk.id)
+      if (index !== -1) {
+        risks.value[index] = { ...remoteRisk }
+      }
+    }
+    
+    for (const remoteRisk of toAdd) {
+      risks.value.push({ ...remoteRisk })
+    }
+    
+    updateIdCounterFromData(risks.value)
+    
+    return true
+  } finally {
+    isApplyingRemoteChange = false
+  }
+}
+
 const handleStorageEvent = (event) => {
   if (event.key !== STORAGE_KEY) return
   
@@ -273,13 +338,9 @@ const handleStorageEvent = (event) => {
   try {
     const parsed = JSON.parse(newValue)
     if (Array.isArray(parsed)) {
-      isApplyingRemoteChange = true
-      try {
-        risks.value = parsed
+      const hasChanges = mergeRemoteRisks(parsed)
+      if (hasChanges) {
         lastSavedValue = newValue
-        updateIdCounterFromData(parsed)
-      } finally {
-        isApplyingRemoteChange = false
       }
     }
   } catch (e) {
@@ -325,7 +386,8 @@ export function useRisks() {
       ...riskData,
       status: riskData.status || RISK_STATUSES.TODO,
       createdAt: now,
-      updatedAt: now
+      updatedAt: now,
+      lastEditedAt: now
     }
     risks.value.push(newRisk)
     return newRisk
@@ -334,10 +396,12 @@ export function useRisks() {
   const updateRisk = (id, updates) => {
     const index = risks.value.findIndex(r => r.id === id)
     if (index !== -1) {
+      const now = new Date().toISOString()
       risks.value[index] = {
         ...risks.value[index],
         ...updates,
-        updatedAt: new Date().toISOString()
+        updatedAt: now,
+        lastEditedAt: now
       }
       return risks.value[index]
     }

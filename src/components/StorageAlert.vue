@@ -10,9 +10,14 @@
           详细信息：{{ error.detail }}
         </div>
       </div>
-      <button class="alert-close" @click="$emit('close')" title="关闭">
-        ×
-      </button>
+      <div class="alert-actions">
+        <button class="alert-confirm-btn" @click="$emit('close')">
+          知道了
+        </button>
+        <button class="alert-close" @click="$emit('close')" title="关闭">
+          ×
+        </button>
+      </div>
     </div>
   </Transition>
 </template>
@@ -88,6 +93,43 @@ defineEmits(['close'])
 
 .alert-load .alert-message {
   color: #a8071a;
+}
+
+.alert-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.alert-confirm-btn {
+  padding: 6px 16px;
+  font-size: 13px;
+  font-weight: 500;
+  border: 1px solid;
+  border-radius: 6px;
+  cursor: pointer;
+  background-color: transparent;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.alert-save .alert-confirm-btn {
+  color: #ad6800;
+  border-color: #d48806;
+}
+
+.alert-save .alert-confirm-btn:hover {
+  background-color: #fff3cd;
+}
+
+.alert-load .alert-confirm-btn {
+  color: #a8071a;
+  border-color: #cf1322;
+}
+
+.alert-load .alert-confirm-btn:hover {
+  background-color: #fff1f0;
 }
 
 .alert-close {

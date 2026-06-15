@@ -6,6 +6,22 @@
         <button class="modal-close" @click="$emit('close')">×</button>
       </div>
       
+      <div v-if="hasConflict" class="conflict-alert">
+        <div class="conflict-icon">⚠️</div>
+        <div class="conflict-content">
+          <div class="conflict-title">检测到冲突</div>
+          <div class="conflict-desc">此风险项已在其他标签页被修改，继续保存可能会覆盖他人的更改。</div>
+          <div class="conflict-actions">
+            <button class="btn btn-sm btn-default" @click="refreshFromRemote">
+              刷新为最新版本
+            </button>
+            <button class="btn btn-sm btn-primary" @click="dismissConflict">
+              继续编辑
+            </button>
+          </div>
+        </div>
+      </div>
+      
       <form @submit.prevent="onSubmit">
         <div class="form-group">
           <label>风险标题 <span class="required">*</span></label>
@@ -122,7 +138,7 @@ const props = defineProps({
 
 const emit = defineEmits(['close', 'submit'])
 
-const { calculateScore, getLevelClass, getLevelDesc } = useRisks()
+const { risks, calculateScore, getLevelClass, getLevelDesc, getRiskById } = useRisks()
 
 const isEdit = computed(() => !!props.risk)
 
@@ -135,6 +151,10 @@ const form = ref({
   owner: '',
   mitigation: ''
 })
+
+const baselineLastEditedAt = ref(null)
+const hasConflict = ref(false)
+const conflictDismissed = ref(false)
 
 const riskScore = computed(() => calculateScore(form.value.impact, form.value.probability))
 const riskLevelClass = computed(() => getLevelClass(riskScore.value))
@@ -150,6 +170,9 @@ const resetForm = () => {
     owner: '',
     mitigation: ''
   }
+  baselineLastEditedAt.value = null
+  hasConflict.value = false
+  conflictDismissed.value = false
 }
 
 const fillForm = () => {
@@ -163,7 +186,48 @@ const fillForm = () => {
       owner: props.risk.owner || '',
       mitigation: props.risk.mitigation || ''
     }
+    baselineLastEditedAt.value = props.risk.lastEditedAt || null
+    hasConflict.value = false
+    conflictDismissed.value = false
   }
+}
+
+const checkConflict = () => {
+  if (!isEdit.value || !props.risk || !baselineLastEditedAt.value || conflictDismissed.value) {
+    return
+  }
+  const current = getRiskById(props.risk.id)
+  if (!current) {
+    hasConflict.value = true
+    return
+  }
+  const baselineTime = new Date(baselineLastEditedAt.value).getTime()
+  const currentTime = new Date(current.lastEditedAt || 0).getTime()
+  hasConflict.value = currentTime > baselineTime
+}
+
+const refreshFromRemote = () => {
+  if (!props.risk) return
+  const current = getRiskById(props.risk.id)
+  if (current) {
+    form.value = {
+      title: current.title,
+      description: current.description || '',
+      impact: current.impact,
+      probability: current.probability,
+      status: current.status,
+      owner: current.owner || '',
+      mitigation: current.mitigation || ''
+    }
+    baselineLastEditedAt.value = current.lastEditedAt || null
+  }
+  hasConflict.value = false
+  conflictDismissed.value = false
+}
+
+const dismissConflict = () => {
+  hasConflict.value = false
+  conflictDismissed.value = true
 }
 
 watch(() => props.visible, (newVal) => {
@@ -175,6 +239,18 @@ watch(() => props.visible, (newVal) => {
     }
   }
 })
+
+watch(() => props.risk, (newRisk) => {
+  if (newRisk && props.visible) {
+    fillForm()
+  }
+}, { deep: true })
+
+watch(risks, () => {
+  if (isEdit.value && props.visible) {
+    checkConflict()
+  }
+}, { deep: true })
 
 onMounted(() => {
   if (props.visible) {
@@ -200,6 +276,54 @@ const onSubmit = () => {
 <style scoped>
 .required {
   color: #ff4d4f;
+}
+
+.conflict-alert {
+  display: flex;
+  gap: 12px;
+  padding: 12px 16px;
+  background-color: #fffbe6;
+  border: 1px solid #ffe58f;
+  border-radius: 6px;
+  margin-bottom: 16px;
+  align-items: flex-start;
+}
+
+.conflict-icon {
+  font-size: 18px;
+  line-height: 1.4;
+  flex-shrink: 0;
+}
+
+.conflict-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.conflict-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #ad6800;
+  margin-bottom: 4px;
+}
+
+.conflict-desc {
+  font-size: 12px;
+  color: #d48806;
+  line-height: 1.5;
+  margin-bottom: 10px;
+}
+
+.conflict-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.btn-sm {
+  padding: 4px 12px;
+  font-size: 12px;
+  height: auto;
+  line-height: 1.5;
 }
 
 .risk-preview {

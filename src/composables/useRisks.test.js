@@ -113,6 +113,8 @@ describe('useRisks composable 测试', () => {
       expect(newRisk.id).toBeTruthy()
       expect(newRisk.createdAt).toBeTruthy()
       expect(newRisk.updatedAt).toBeTruthy()
+      expect(newRisk.lastEditedAt).toBeTruthy()
+      expect(newRisk.lastEditedAt).toBe(newRisk.updatedAt)
     })
 
     it('应该使用传入的 status', () => {
@@ -157,6 +159,7 @@ describe('useRisks composable 测试', () => {
     it('应该更新风险项', () => {
       const risk = composable.risks.value[0]
       const originalUpdatedAt = risk.updatedAt
+      const originalLastEditedAt = risk.lastEditedAt
 
       const updated = composable.updateRisk(risk.id, {
         title: '更新后的标题',
@@ -167,6 +170,8 @@ describe('useRisks composable 测试', () => {
       expect(updated.title).toBe('更新后的标题')
       expect(updated.owner).toBe('新负责人')
       expect(updated.updatedAt).not.toBe(originalUpdatedAt)
+      expect(updated.lastEditedAt).not.toBe(originalLastEditedAt)
+      expect(updated.lastEditedAt).toBe(updated.updatedAt)
     })
 
     it('不存在的 ID 应返回 null', () => {
@@ -428,8 +433,9 @@ describe('useRisks composable 测试', () => {
   })
 
   describe('多标签页同步（storage 事件）', () => {
-    it('模拟其他标签页变更时应该同步数据', async () => {
-      const anotherTabData = [{
+    it('模拟其他标签页新增风险时应细粒度合并', async () => {
+      const originalCount = composable.risks.value.length
+      const newRiskFromRemote = {
         id: 'risk_99',
         title: '另一个标签页添加的风险',
         impact: IMPACT_LEVELS.HIGH,
@@ -438,22 +444,98 @@ describe('useRisks composable 测试', () => {
         owner: '其他用户',
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
+        lastEditedAt: new Date().toISOString(),
         description: '来自另一个标签页',
         mitigation: ''
-      }]
+      }
 
+      const remoteData = [...composable.risks.value, newRiskFromRemote]
       const storageEvent = new StorageEvent('storage', {
         key: STORAGE_KEY,
         oldValue: localStorage.getItem(STORAGE_KEY),
-        newValue: JSON.stringify(anotherTabData),
+        newValue: JSON.stringify(remoteData),
         storageArea: localStorage
       })
       window.dispatchEvent(storageEvent)
 
       await nextTick()
 
-      expect(composable.risks.value.length).toBe(1)
-      expect(composable.risks.value[0].title).toBe('另一个标签页添加的风险')
+      expect(composable.risks.value.length).toBe(originalCount + 1)
+      expect(composable.risks.value.find(r => r.id === 'risk_99')).toBeTruthy()
+      expect(composable.risks.value.find(r => r.id === 'risk_99').title).toBe('另一个标签页添加的风险')
+    })
+
+    it('模拟其他标签页删除风险时应细粒度合并', async () => {
+      const originalCount = composable.risks.value.length
+      const firstRiskId = composable.risks.value[0].id
+      
+      const remoteData = composable.risks.value.filter(r => r.id !== firstRiskId)
+      const storageEvent = new StorageEvent('storage', {
+        key: STORAGE_KEY,
+        oldValue: localStorage.getItem(STORAGE_KEY),
+        newValue: JSON.stringify(remoteData),
+        storageArea: localStorage
+      })
+      window.dispatchEvent(storageEvent)
+
+      await nextTick()
+
+      expect(composable.risks.value.length).toBe(originalCount - 1)
+      expect(composable.risks.value.find(r => r.id === firstRiskId)).toBeUndefined()
+    })
+
+    it('远程 lastEditedAt 较新时应更新本地数据', async () => {
+      const risk = composable.risks.value[0]
+      const originalTitle = risk.title
+      
+      const remoteUpdatedTime = new Date(Date.now() + 10000).toISOString()
+      const remoteData = composable.risks.value.map(r => {
+        if (r.id === risk.id) {
+          return { ...r, title: '远程更新的标题', lastEditedAt: remoteUpdatedTime }
+        }
+        return r
+      })
+
+      const storageEvent = new StorageEvent('storage', {
+        key: STORAGE_KEY,
+        oldValue: localStorage.getItem(STORAGE_KEY),
+        newValue: JSON.stringify(remoteData),
+        storageArea: localStorage
+      })
+      window.dispatchEvent(storageEvent)
+
+      await nextTick()
+
+      const updatedRisk = composable.getRiskById(risk.id)
+      expect(updatedRisk.title).toBe('远程更新的标题')
+      expect(updatedRisk.lastEditedAt).toBe(remoteUpdatedTime)
+    })
+
+    it('本地 lastEditedAt 较新时不应被远程覆盖（保护本地拖拽/编辑）', async () => {
+      const risk = composable.risks.value[0]
+      
+      composable.updateRisk(risk.id, { title: '本地更新的标题' })
+      
+      const remoteUpdatedTime = new Date(Date.now() - 10000).toISOString()
+      const remoteData = composable.risks.value.map(r => {
+        if (r.id === risk.id) {
+          return { ...r, title: '远程更新的标题', lastEditedAt: remoteUpdatedTime }
+        }
+        return r
+      })
+
+      const storageEvent = new StorageEvent('storage', {
+        key: STORAGE_KEY,
+        oldValue: localStorage.getItem(STORAGE_KEY),
+        newValue: JSON.stringify(remoteData),
+        storageArea: localStorage
+      })
+      window.dispatchEvent(storageEvent)
+
+      await nextTick()
+
+      const updatedRisk = composable.getRiskById(risk.id)
+      expect(updatedRisk.title).toBe('本地更新的标题')
     })
 
     it('其他标签页清空数据时应回退到示例数据', async () => {
