@@ -59,7 +59,10 @@ import {
   IMPACT_LABELS, 
   IMPACT_COLORS, 
   PROBABILITY_LABELS,
-  STATUS_COLORS 
+  STATUS_COLORS,
+  calculateRiskScore,
+  getRiskLevelClass,
+  useRisks
 } from '../composables/useRisks.js'
 
 const props = defineProps({
@@ -71,6 +74,8 @@ const props = defineProps({
 
 const emit = defineEmits(['edit', 'delete', 'dragstart', 'dragend'])
 
+const { calculateScore, getLevelClass } = useRisks()
+
 const isDragging = ref(false)
 
 const impactLabel = computed(() => IMPACT_LABELS[props.risk.impact] || '未知')
@@ -78,21 +83,8 @@ const impactColor = computed(() => IMPACT_COLORS[props.risk.impact] || '#999')
 const probabilityLabel = computed(() => PROBABILITY_LABELS[props.risk.probability] || '未知')
 const statusColor = computed(() => STATUS_COLORS[props.risk.status] || '#999')
 
-const riskScore = computed(() => {
-  const impactScores = { low: 1, medium: 2, high: 3, critical: 4 }
-  const probScores = { low: 1, medium: 2, high: 3 }
-  const impact = impactScores[props.risk.impact] || 1
-  const prob = probScores[props.risk.probability] || 1
-  return impact * prob
-})
-
-const riskLevelClass = computed(() => {
-  const score = riskScore.value
-  if (score >= 9) return 'level-critical'
-  if (score >= 6) return 'level-high'
-  if (score >= 3) return 'level-medium'
-  return 'level-low'
-})
+const riskScore = computed(() => calculateScore(props.risk.impact, props.risk.probability))
+const riskLevelClass = computed(() => getLevelClass(riskScore.value))
 
 const formatDate = (dateStr) => {
   const date = new Date(dateStr)

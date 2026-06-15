@@ -98,7 +98,12 @@
 
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue'
-import { IMPACT_LEVELS, PROBABILITY_LEVELS, RISK_STATUSES } from '../composables/useRisks.js'
+import { 
+  IMPACT_LEVELS, 
+  PROBABILITY_LEVELS, 
+  RISK_STATUSES,
+  useRisks
+} from '../composables/useRisks.js'
 
 const props = defineProps({
   visible: {
@@ -117,6 +122,8 @@ const props = defineProps({
 
 const emit = defineEmits(['close', 'submit'])
 
+const { calculateScore, getLevelClass, getLevelDesc } = useRisks()
+
 const isEdit = computed(() => !!props.risk)
 
 const form = ref({
@@ -129,29 +136,9 @@ const form = ref({
   mitigation: ''
 })
 
-const riskScore = computed(() => {
-  const impactScores = { low: 1, medium: 2, high: 3, critical: 4 }
-  const probScores = { low: 1, medium: 2, high: 3 }
-  const impact = impactScores[form.value.impact] || 1
-  const prob = probScores[form.value.probability] || 1
-  return impact * prob
-})
-
-const riskLevelClass = computed(() => {
-  const score = riskScore.value
-  if (score >= 9) return 'level-critical'
-  if (score >= 6) return 'level-high'
-  if (score >= 3) return 'level-medium'
-  return 'level-low'
-})
-
-const riskLevelDesc = computed(() => {
-  const score = riskScore.value
-  if (score >= 9) return '（极高风险，需立即处理）'
-  if (score >= 6) return '（高风险，需重点关注）'
-  if (score >= 3) return '（中风险，需跟踪）'
-  return '（低风险，持续观察）'
-})
+const riskScore = computed(() => calculateScore(form.value.impact, form.value.probability))
+const riskLevelClass = computed(() => getLevelClass(riskScore.value))
+const riskLevelDesc = computed(() => getLevelDesc(riskScore.value))
 
 const resetForm = () => {
   form.value = {

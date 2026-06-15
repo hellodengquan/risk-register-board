@@ -1,4 +1,4 @@
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 
 export const RISK_STATUSES = {
   TODO: 'todo',
@@ -54,74 +54,146 @@ export const PROBABILITY_LABELS = {
   [PROBABILITY_LEVELS.HIGH]: '高'
 }
 
+export const IMPACT_SCORES = {
+  [IMPACT_LEVELS.LOW]: 1,
+  [IMPACT_LEVELS.MEDIUM]: 2,
+  [IMPACT_LEVELS.HIGH]: 3,
+  [IMPACT_LEVELS.CRITICAL]: 4
+}
+
+export const PROBABILITY_SCORES = {
+  [PROBABILITY_LEVELS.LOW]: 1,
+  [PROBABILITY_LEVELS.MEDIUM]: 2,
+  [PROBABILITY_LEVELS.HIGH]: 3
+}
+
+export function calculateRiskScore(impact, probability) {
+  const impactScore = IMPACT_SCORES[impact] ?? 1
+  const probScore = PROBABILITY_SCORES[probability] ?? 1
+  return impactScore * probScore
+}
+
+export function getRiskLevelClass(score) {
+  if (score >= 9) return 'level-critical'
+  if (score >= 6) return 'level-high'
+  if (score >= 3) return 'level-medium'
+  return 'level-low'
+}
+
+export function getRiskLevelDesc(score) {
+  if (score >= 9) return '（极高风险，需立即处理）'
+  if (score >= 6) return '（高风险，需重点关注）'
+  if (score >= 3) return '（中风险，需跟踪）'
+  return '（低风险，持续观察）'
+}
+
 let idCounter = 1
 
 const generateId = () => `risk_${idCounter++}`
 
-const sampleRisks = [
-  {
-    id: generateId(),
-    title: '需求变更频繁',
-    description: '客户需求经常变动，导致开发返工和进度延误',
-    impact: IMPACT_LEVELS.HIGH,
-    probability: PROBABILITY_LEVELS.HIGH,
-    status: RISK_STATUSES.TODO,
-    owner: '张三',
-    createdAt: new Date('2024-01-10').toISOString(),
-    updatedAt: new Date('2024-01-10').toISOString(),
-    mitigation: ''
-  },
-  {
-    id: generateId(),
-    title: '技术债务累积',
-    description: '历史代码质量不佳，新功能开发难度增加',
-    impact: IMPACT_LEVELS.MEDIUM,
-    probability: PROBABILITY_LEVELS.MEDIUM,
-    status: RISK_STATUSES.IN_PROGRESS,
-    owner: '李四',
-    createdAt: new Date('2024-01-08').toISOString(),
-    updatedAt: new Date('2024-01-12').toISOString(),
-    mitigation: '计划重构核心模块'
-  },
-  {
-    id: generateId(),
-    title: '人员流动风险',
-    description: '核心开发人员可能离职，影响项目进度',
-    impact: IMPACT_LEVELS.CRITICAL,
-    probability: PROBABILITY_LEVELS.LOW,
-    status: RISK_STATUSES.TODO,
-    owner: '王五',
-    createdAt: new Date('2024-01-05').toISOString(),
-    updatedAt: new Date('2024-01-05').toISOString(),
-    mitigation: ''
-  },
-  {
-    id: generateId(),
-    title: '第三方接口不稳定',
-    description: '外部依赖的API经常超时或返回错误',
-    impact: IMPACT_LEVELS.HIGH,
-    probability: PROBABILITY_LEVELS.MEDIUM,
-    status: RISK_STATUSES.RESOLVED,
-    owner: '赵六',
-    createdAt: new Date('2024-01-02').toISOString(),
-    updatedAt: new Date('2024-01-15').toISOString(),
-    mitigation: '增加熔断和降级机制，已上线验证'
-  },
-  {
-    id: generateId(),
-    title: '性能瓶颈',
-    description: '系统在高并发下响应变慢',
-    impact: IMPACT_LEVELS.MEDIUM,
-    probability: PROBABILITY_LEVELS.LOW,
-    status: RISK_STATUSES.CLOSED,
-    owner: '孙七',
-    createdAt: new Date('2023-12-20').toISOString(),
-    updatedAt: new Date('2024-01-10').toISOString(),
-    mitigation: '优化数据库查询，增加缓存层'
-  }
-]
+const createSampleRisks = () => {
+  const resetCounter = () => { idCounter = 1 }
+  resetCounter()
+  
+  return [
+    {
+      id: generateId(),
+      title: '需求变更频繁',
+      description: '客户需求经常变动，导致开发返工和进度延误',
+      impact: IMPACT_LEVELS.HIGH,
+      probability: PROBABILITY_LEVELS.HIGH,
+      status: RISK_STATUSES.TODO,
+      owner: '张三',
+      createdAt: new Date('2024-01-10').toISOString(),
+      updatedAt: new Date('2024-01-10').toISOString(),
+      mitigation: ''
+    },
+    {
+      id: generateId(),
+      title: '技术债务累积',
+      description: '历史代码质量不佳，新功能开发难度增加',
+      impact: IMPACT_LEVELS.MEDIUM,
+      probability: PROBABILITY_LEVELS.MEDIUM,
+      status: RISK_STATUSES.IN_PROGRESS,
+      owner: '李四',
+      createdAt: new Date('2024-01-08').toISOString(),
+      updatedAt: new Date('2024-01-12').toISOString(),
+      mitigation: '计划重构核心模块'
+    },
+    {
+      id: generateId(),
+      title: '人员流动风险',
+      description: '核心开发人员可能离职，影响项目进度',
+      impact: IMPACT_LEVELS.CRITICAL,
+      probability: PROBABILITY_LEVELS.LOW,
+      status: RISK_STATUSES.TODO,
+      owner: '王五',
+      createdAt: new Date('2024-01-05').toISOString(),
+      updatedAt: new Date('2024-01-05').toISOString(),
+      mitigation: ''
+    },
+    {
+      id: generateId(),
+      title: '第三方接口不稳定',
+      description: '外部依赖的API经常超时或返回错误',
+      impact: IMPACT_LEVELS.HIGH,
+      probability: PROBABILITY_LEVELS.MEDIUM,
+      status: RISK_STATUSES.RESOLVED,
+      owner: '赵六',
+      createdAt: new Date('2024-01-02').toISOString(),
+      updatedAt: new Date('2024-01-15').toISOString(),
+      mitigation: '增加熔断和降级机制，已上线验证'
+    },
+    {
+      id: generateId(),
+      title: '性能瓶颈',
+      description: '系统在高并发下响应变慢',
+      impact: IMPACT_LEVELS.MEDIUM,
+      probability: PROBABILITY_LEVELS.LOW,
+      status: RISK_STATUSES.CLOSED,
+      owner: '孙七',
+      createdAt: new Date('2023-12-20').toISOString(),
+      updatedAt: new Date('2024-01-10').toISOString(),
+      mitigation: '优化数据库查询，增加缓存层'
+    }
+  ]
+}
 
-const risks = ref([...sampleRisks])
+const STORAGE_KEY = 'risk_register_board_risks'
+
+const loadFromStorage = () => {
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY)
+    if (stored) {
+      const data = JSON.parse(stored)
+      if (Array.isArray(data) && data.length > 0) {
+        const maxId = Math.max(...data.map(r => {
+          const match = r.id?.match(/risk_(\d+)/)
+          return match ? parseInt(match[1], 10) : 0
+        }))
+        idCounter = maxId + 1
+        return data
+      }
+    }
+  } catch (e) {
+    console.warn('Failed to load risks from localStorage:', e)
+  }
+  return createSampleRisks()
+}
+
+const saveToStorage = (data) => {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(data))
+  } catch (e) {
+    console.warn('Failed to save risks to localStorage:', e)
+  }
+}
+
+const risks = ref(loadFromStorage())
+
+watch(risks, (newVal) => {
+  saveToStorage(newVal)
+}, { deep: true })
 
 export function useRisks() {
   const risksByStatus = computed(() => {
@@ -149,7 +221,7 @@ export function useRisks() {
     const newRisk = {
       id: generateId(),
       ...riskData,
-      status: RISK_STATUSES.TODO,
+      status: riskData.status || RISK_STATUSES.TODO,
       createdAt: now,
       updatedAt: now
     }
@@ -180,11 +252,26 @@ export function useRisks() {
   }
 
   const moveRisk = (id, newStatus) => {
+    const risk = risks.value.find(r => r.id === id)
+    if (!risk) return null
+    
+    if (risk.status === newStatus) {
+      return risk
+    }
+    
     return updateRisk(id, { status: newStatus })
   }
 
   const getRiskById = (id) => {
     return risks.value.find(r => r.id === id)
+  }
+
+  const calculateScore = (impact, probability) => calculateRiskScore(impact, probability)
+  const getLevelClass = (score) => getRiskLevelClass(score)
+  const getLevelDesc = (score) => getRiskLevelDesc(score)
+
+  const reset = () => {
+    risks.value = loadFromStorage()
   }
 
   return {
@@ -195,6 +282,10 @@ export function useRisks() {
     updateRisk,
     deleteRisk,
     moveRisk,
-    getRiskById
+    getRiskById,
+    calculateScore,
+    getLevelClass,
+    getLevelDesc,
+    reset
   }
 }
