@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, beforeAll, afterAll, vi } from 'vitest'
 import { nextTick } from 'vue'
 import {
   calculateRiskScore,
@@ -9,7 +9,8 @@ import {
   RISK_STATUSES,
   IMPACT_SCORES,
   PROBABILITY_SCORES,
-  useRisks
+  useRisks,
+  useStorageError
 } from './useRisks.js'
 
 describe('纯函数测试', () => {
@@ -69,9 +70,12 @@ describe('纯函数测试', () => {
 
 describe('useRisks composable 测试', () => {
   let composable
+  const STORAGE_KEY = 'risk_register_board_risks'
 
   beforeEach(() => {
     composable = useRisks()
+    composable.clearStorageError()
+    localStorage.removeItem(STORAGE_KEY)
     composable.reset()
   })
 
@@ -246,7 +250,6 @@ describe('useRisks composable 测试', () => {
 
   describe('localStorage 持久化', () => {
     it('数据变更应该保存到 localStorage', async () => {
-      const STORAGE_KEY = 'risk_register_board_risks'
       localStorage.removeItem(STORAGE_KEY)
       
       composable.addRisk({
@@ -265,9 +268,7 @@ describe('useRisks composable 测试', () => {
       expect(parsed[5].title).toBe('持久化测试风险')
     })
 
-    it('应该从 localStorage 恢复数据', async () => {
-      const STORAGE_KEY = 'risk_register_board_risks'
-      
+    it('应该从 localStorage 恢复非空数组', async () => {
       const testData = [{
         id: 'test_1',
         title: '本地存储测试',
@@ -289,15 +290,200 @@ describe('useRisks composable 测试', () => {
       expect(composable.risks.value[0].title).toBe('本地存储测试')
     })
 
-    it('localStorage 异常应优雅降级', () => {
-      const STORAGE_KEY = 'risk_register_board_risks'
-      vi.spyOn(localStorage, 'getItem').mockImplementation(() => {
-        throw new Error('Storage error')
-      })
+    it('应该保留空数组，不会回退到示例数据', async () => {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify([]))
+      
+      composable.reset()
+      
+      expect(composable.risks.value.length).toBe(0)
+      expect(composable.stats.value.total).toBe(0)
+      
+      await nextTick()
+      const stored = localStorage.getItem(STORAGE_KEY)
+      expect(JSON.parse(stored)).toEqual([])
+    })
+
+    it('删除所有风险后刷新应保持空数组', async () => {
+      const totalCount = composable.risks.value.length
+      for (let i = totalCount - 1; i >= 0; i--) {
+        composable.deleteRisk(composable.risks.value[i].id)
+      }
+      
+      expect(composable.risks.value.length).toBe(0)
+      await nextTick()
+      
+      const stored = localStorage.getItem(STORAGE_KEY)
+      expect(JSON.parse(stored)).toEqual([])
+      
+      composable.reset()
+      expect(composable.risks.value.length).toBe(0)
+    })
+
+    it('localStorage 读取异常应优雅降级并设置错误', () => {
+      composable.clearStorageError()
+      localStorage.removeItem(STORAGE_KEY)
+      
+      const origGetItem = Storage.prototype.getItem
+      Storage.prototype.getItem = function(key) {
+        if (key === STORAGE_KEY) {
+          throw new Error('Storage read error')
+        }
+        return origGetItem.call(this, key)
+      }
 
       composable.reset()
+      Storage.prototype.getItem = origGetItem
 
       expect(composable.risks.value.length).toBe(5)
+      expect(composable.storageError.value).not.toBeNull()
+      expect(composable.storageError.value.type).toBe('load')
+    })
+
+    it('localStorage 写入异常应设置错误状态', async () => {
+      composable.clearStorageError()
+      
+      const origSetItem = Storage.prototype.setItem
+      Storage.prototype.setItem = function(key, val) {
+        if (key === STORAGE_KEY) {
+          throw new Error('Storage write error')
+        }
+        return origSetItem.call(this, key, val)
+      }
+
+      composable.addRisk({
+        title: '写入失败测试',
+        impact: IMPACT_LEVELS.LOW,
+        probability: PROBABILITY_LEVELS.LOW
+      })
+
+      await nextTick()
+      Storage.prototype.setItem = origSetItem
+
+      expect(composable.storageError.value).not.toBeNull()
+      expect(composable.storageError.value.type).toBe('save')
+      expect(composable.storageError.value.message).toContain('保存数据失败')
+    })
+
+    it('写入恢复成功后应清除 save 错误', async () => {
+      composable.clearStorageError()
+      let shouldFail = true
+      
+      const origSetItem = Storage.prototype.setItem
+      Storage.prototype.setItem = function(key, val) {
+        if (key !== STORAGE_KEY) {
+          return origSetItem.call(this, key, val)
+        }
+        if (shouldFail) {
+          throw new Error('Quota exceeded')
+        }
+        return origSetItem.call(this, key, val)
+      }
+
+      composable.addRisk({
+        title: '第一次会失败',
+        impact: IMPACT_LEVELS.LOW,
+        probability: PROBABILITY_LEVELS.LOW
+      })
+      await nextTick()
+      expect(composable.storageError.value?.type).toBe('save')
+
+      shouldFail = false
+      composable.addRisk({
+        title: '第二次会成功',
+        impact: IMPACT_LEVELS.LOW,
+        probability: PROBABILITY_LEVELS.LOW
+      })
+      await nextTick()
+      Storage.prototype.setItem = origSetItem
+      expect(composable.storageError.value).toBeNull()
+    })
+  })
+
+  describe('storageError 错误管理', () => {
+    it('useStorageError 应返回响应式错误状态', () => {
+      const errorRef = useStorageError()
+      expect(errorRef.value).toBeNull()
+    })
+
+    it('clearStorageError 应该清除错误状态', () => {
+      composable.clearStorageError()
+      localStorage.removeItem(STORAGE_KEY)
+      
+      const origGetItem = Storage.prototype.getItem
+      Storage.prototype.getItem = function(key) {
+        if (key === STORAGE_KEY) {
+          throw new Error('Storage error')
+        }
+        return origGetItem.call(this, key)
+      }
+
+      composable.reset()
+      Storage.prototype.getItem = origGetItem
+      
+      expect(composable.storageError.value).not.toBeNull()
+      
+      composable.clearStorageError()
+      expect(composable.storageError.value).toBeNull()
+    })
+  })
+
+  describe('多标签页同步（storage 事件）', () => {
+    it('模拟其他标签页变更时应该同步数据', async () => {
+      const anotherTabData = [{
+        id: 'risk_99',
+        title: '另一个标签页添加的风险',
+        impact: IMPACT_LEVELS.HIGH,
+        probability: PROBABILITY_LEVELS.HIGH,
+        status: RISK_STATUSES.TODO,
+        owner: '其他用户',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        description: '来自另一个标签页',
+        mitigation: ''
+      }]
+
+      const storageEvent = new StorageEvent('storage', {
+        key: STORAGE_KEY,
+        oldValue: localStorage.getItem(STORAGE_KEY),
+        newValue: JSON.stringify(anotherTabData),
+        storageArea: localStorage
+      })
+      window.dispatchEvent(storageEvent)
+
+      await nextTick()
+
+      expect(composable.risks.value.length).toBe(1)
+      expect(composable.risks.value[0].title).toBe('另一个标签页添加的风险')
+    })
+
+    it('其他标签页清空数据时应回退到示例数据', async () => {
+      const storageEvent = new StorageEvent('storage', {
+        key: STORAGE_KEY,
+        oldValue: localStorage.getItem(STORAGE_KEY),
+        newValue: null,
+        storageArea: localStorage
+      })
+      window.dispatchEvent(storageEvent)
+
+      await nextTick()
+
+      expect(composable.risks.value.length).toBe(5)
+    })
+
+    it('非目标 key 的 storage 事件不应影响数据', async () => {
+      const originalCount = composable.risks.value.length
+
+      const storageEvent = new StorageEvent('storage', {
+        key: 'some_other_key',
+        oldValue: null,
+        newValue: '[]',
+        storageArea: localStorage
+      })
+      window.dispatchEvent(storageEvent)
+
+      await nextTick()
+
+      expect(composable.risks.value.length).toBe(originalCount)
     })
   })
 
@@ -309,6 +495,35 @@ describe('useRisks composable 测试', () => {
       expect(risk1.id).not.toBe(risk2.id)
       expect(risk1.id).toMatch(/risk_\d+/)
       expect(risk2.id).toMatch(/risk_\d+/)
+    })
+
+    it('从空数组恢复时 ID 计数器应重置为 1', async () => {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify([]))
+      composable.reset()
+      
+      const newRisk = composable.addRisk({ title: '新风险', impact: 'low', probability: 'low' })
+      expect(newRisk.id).toBe('risk_1')
+    })
+
+    it('从已有数据恢复时 ID 应继续递增', async () => {
+      const testData = [{
+        id: 'risk_42',
+        title: '已有数据',
+        impact: IMPACT_LEVELS.LOW,
+        probability: PROBABILITY_LEVELS.LOW,
+        status: RISK_STATUSES.TODO,
+        owner: '',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        description: '',
+        mitigation: ''
+      }]
+      
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(testData))
+      composable.reset()
+      
+      const newRisk = composable.addRisk({ title: '新风险', impact: 'low', probability: 'low' })
+      expect(newRisk.id).toBe('risk_43')
     })
   })
 

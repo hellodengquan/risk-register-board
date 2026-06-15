@@ -1,4 +1,21 @@
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted, getCurrentInstance } from 'vue'
+
+let storageEventListenerRegistered = false
+
+const ensureStorageListener = () => {
+  if (storageEventListenerRegistered) return
+  if (typeof window !== 'undefined' && window.addEventListener) {
+    window.addEventListener('storage', handleStorageEvent)
+    storageEventListenerRegistered = true
+  }
+}
+
+const removeStorageListener = () => {
+  if (typeof window !== 'undefined' && window.removeEventListener) {
+    window.removeEventListener('storage', handleStorageEvent)
+    storageEventListenerRegistered = false
+  }
+}
 
 export const RISK_STATUSES = {
   TODO: 'todo',
@@ -92,8 +109,7 @@ let idCounter = 1
 const generateId = () => `risk_${idCounter++}`
 
 const createSampleRisks = () => {
-  const resetCounter = () => { idCounter = 1 }
-  resetCounter()
+  idCounter = 1
   
   return [
     {
@@ -161,31 +177,71 @@ const createSampleRisks = () => {
 
 const STORAGE_KEY = 'risk_register_board_risks'
 
+const storageError = ref(null)
+
+export const useStorageError = () => storageError
+
+let lastSavedValue = null
+let isApplyingRemoteChange = false
+
+const parseIdNumber = (id) => {
+  const match = id?.match(/risk_(\d+)/)
+  return match ? parseInt(match[1], 10) : 0
+}
+
+const updateIdCounterFromData = (data) => {
+  if (data.length > 0) {
+    const maxId = Math.max(...data.map(r => parseIdNumber(r.id)))
+    idCounter = maxId + 1
+  } else {
+    idCounter = 1
+  }
+}
+
 const loadFromStorage = () => {
   try {
     const stored = localStorage.getItem(STORAGE_KEY)
-    if (stored) {
+    if (stored !== null) {
       const data = JSON.parse(stored)
-      if (Array.isArray(data) && data.length > 0) {
-        const maxId = Math.max(...data.map(r => {
-          const match = r.id?.match(/risk_(\d+)/)
-          return match ? parseInt(match[1], 10) : 0
-        }))
-        idCounter = maxId + 1
+      if (Array.isArray(data)) {
+        updateIdCounterFromData(data)
+        lastSavedValue = JSON.stringify(data)
         return data
       }
     }
   } catch (e) {
     console.warn('Failed to load risks from localStorage:', e)
+    storageError.value = {
+      type: 'load',
+      message: '读取本地数据失败，已使用示例数据',
+      detail: e.message
+    }
   }
-  return createSampleRisks()
+  
+  const sampleData = createSampleRisks()
+  lastSavedValue = JSON.stringify(sampleData)
+  return sampleData
 }
 
 const saveToStorage = (data) => {
+  if (isApplyingRemoteChange) return
+  
+  const serialized = JSON.stringify(data)
+  if (serialized === lastSavedValue) return
+  
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(data))
+    localStorage.setItem(STORAGE_KEY, serialized)
+    lastSavedValue = serialized
+    if (storageError.value?.type === 'save') {
+      storageError.value = null
+    }
   } catch (e) {
     console.warn('Failed to save risks to localStorage:', e)
+    storageError.value = {
+      type: 'save',
+      message: '保存数据失败：存储空间可能已满，当前操作仅在本页面生效',
+      detail: e.message
+    }
   }
 }
 
@@ -195,7 +251,53 @@ watch(risks, (newVal) => {
   saveToStorage(newVal)
 }, { deep: true })
 
+const handleStorageEvent = (event) => {
+  if (event.key !== STORAGE_KEY) return
+  
+  const newValue = event.newValue
+  
+  if (newValue === null) {
+    isApplyingRemoteChange = true
+    try {
+      risks.value = createSampleRisks()
+      lastSavedValue = JSON.stringify(risks.value)
+      updateIdCounterFromData(risks.value)
+    } finally {
+      isApplyingRemoteChange = false
+    }
+    return
+  }
+  
+  if (newValue === lastSavedValue) return
+  
+  try {
+    const parsed = JSON.parse(newValue)
+    if (Array.isArray(parsed)) {
+      isApplyingRemoteChange = true
+      try {
+        risks.value = parsed
+        lastSavedValue = newValue
+        updateIdCounterFromData(parsed)
+      } finally {
+        isApplyingRemoteChange = false
+      }
+    }
+  } catch (e) {
+    console.warn('Failed to sync risks from storage event:', e)
+  }
+}
+
 export function useRisks() {
+  const instance = getCurrentInstance()
+  
+  ensureStorageListener()
+  
+  if (instance) {
+    onMounted(() => {
+      ensureStorageListener()
+    })
+  }
+
   const risksByStatus = computed(() => {
     const grouped = {}
     Object.values(RISK_STATUSES).forEach(status => {
@@ -270,6 +372,10 @@ export function useRisks() {
   const getLevelClass = (score) => getRiskLevelClass(score)
   const getLevelDesc = (score) => getRiskLevelDesc(score)
 
+  const clearStorageError = () => {
+    storageError.value = null
+  }
+
   const reset = () => {
     risks.value = loadFromStorage()
   }
@@ -286,6 +392,8 @@ export function useRisks() {
     calculateScore,
     getLevelClass,
     getLevelDesc,
-    reset
+    reset,
+    storageError,
+    clearStorageError
   }
 }

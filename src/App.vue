@@ -61,6 +61,11 @@
         </div>
       </div>
     </div>
+
+    <StorageAlert
+      :error="storageError"
+      @close="clearStorageError"
+    />
   </div>
 </template>
 
@@ -68,9 +73,10 @@
 import { ref, computed } from 'vue'
 import KanbanColumn from './components/KanbanColumn.vue'
 import RiskModal from './components/RiskModal.vue'
+import StorageAlert from './components/StorageAlert.vue'
 import { useRisks, RISK_STATUSES, STATUS_LABELS } from './composables/useRisks.js'
 
-const { risksByStatus, stats, addRisk, updateRisk, deleteRisk, moveRisk } = useRisks()
+const { risksByStatus, stats, addRisk, updateRisk, deleteRisk, moveRisk, storageError, clearStorageError } = useRisks()
 
 const columns = [
   { status: RISK_STATUSES.TODO, title: STATUS_LABELS[RISK_STATUSES.TODO] },
